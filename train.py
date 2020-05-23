@@ -72,7 +72,7 @@ def get_datasetname(args):
         src = visda_train
         tgt = visda_test
         visda = True
-    return src,tgt,office,visda,noe
+    return src, tgt, office,visda,noe
 
 
 src,tgt,office,visda,noe = get_datasetname(args)
@@ -359,6 +359,7 @@ if noe < 2:
     test_interval = 500
     num_iter = max_iter
     for iter_num in range(1, num_iter + 1):
+        print(iter_num)
         net.train(True)
         if office == False:
             optimizer = inv_lr_scheduler(param_lr, optimizer, iter_num, init_lr=0.003, gamma=0.0001, power=0.75,
@@ -474,6 +475,7 @@ else:
     test_interval = 500
     num_iter = max_iter
     for iter_num in range(1, num_iter + 1):
+        print(iter_num)
         net.train(True)
         optimizer = inv_lr_scheduler(param_lr, optimizer, iter_num, init_lr=0.003, gamma=0.001, power=0.75)
         optimizer.zero_grad()
