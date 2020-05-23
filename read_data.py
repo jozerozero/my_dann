@@ -110,6 +110,18 @@ def make_dataset(image_list, labels):
     return images
 
 
+def make_dataset_with_loader(image_list, labels, loader):
+    if labels:
+        len_ = len(image_list)
+        images = [(image_list[i].strip(), labels[i, :]) for i in xrange(len_)]
+    else:
+        if len(image_list[0].split()) > 2:
+            images = [(val.split()[0], np.array([int(la) for la in val.split()[1:]])) for val in image_list]
+        else:
+            images = [(loader(val.split()[0]), int(val.split()[1])) for val in image_list]
+    return images
+
+
 def pil_loader(path):
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     with open(path, 'rb') as f:
@@ -169,6 +181,7 @@ class ImageList(object):
     def __init__(self, image_list, labels=None, transform=None, target_transform=None,
                  loader=default_loader):
         imgs = make_dataset(image_list, labels)
+        # imgs = make_dataset_with_loader(image_list, labels, loader)
         if len(imgs) == 0:
             raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
                                                                              "Supported image extensions are: " + ",".join(
