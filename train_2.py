@@ -18,7 +18,7 @@ parser.add_argument('--src', type=str, default='A', metavar='S',
                     help='source dataset')
 parser.add_argument('--tgt', type=str, default='C', metavar='S',
                     help='target dataset')
-parser.add_argument('--num_iter', type=int, default=20002,
+parser.add_argument('--num_iter', type=int, default=5002,
                     help='max iter_num')
 args = parser.parse_args()
 
