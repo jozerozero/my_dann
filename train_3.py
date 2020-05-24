@@ -131,6 +131,7 @@ def test_target(loader, model, test_iter=0):
 
 def inv_lr_scheduler(param_lr, optimizer, iter_num, gamma, power, init_lr=0.001, weight_decay=0.0005):
     """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
+    # lr = init_lr * (1 + gamma * iter_num) ** (-power)
     lr = init_lr * (1 + gamma * iter_num) ** (-power)
     i = 0
     for param_group in optimizer.param_groups:
@@ -140,23 +141,54 @@ def inv_lr_scheduler(param_lr, optimizer, iter_num, gamma, power, init_lr=0.001,
     return optimizer
 
 
+class DomainEncoder(nn.Module):
+
+    def __init__(self, domain_hidden_state=1):
+        super(DomainEncoder, self).__init__()
+        self.domain_hidden_state = 1
+        self.domain_encoder = nn.Linear(2, domain_hidden_state)
+        self.domain_encoder.apply(init_weights)
+
+    def forward(self, domain_input):
+        return self.domain_encoder(domain_input)
+        pass
+
+
+class Decoder(nn.Module):
+    
+    def __init__(self, input_size=1025, ):
+        super(Decoder, self).__init__()
+        self.decoder_layer1 = nn.Linear(input_size, 2048)
+        self.decoder_layer1.apply(init_weights)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.5)
+        pass
+
+    def forward(self, inner_code, domain_code):
+        decoder_input = torch.cat([inner_code, domain_code], dim=0)
+        return self.dropout(self.relu(self.decoder_layer1(decoder_input)))
+
 
 class BSP_CDAN(nn.Module):
     def __init__(self, num_features):
         super(BSP_CDAN, self).__init__()
         self.model_fc = model.Resnet50Fc()
-        self.bottleneck_layer1 = nn.Linear(num_features, 2000)
+        self.bottleneck_layer1 = nn.Linear(num_features+1, 2000)
         self.bottleneck_layer1.apply(init_weights)
-        self.bottleneck_layer2 = nn.Linear(2000, 100)
+        self.bottleneck_layer2 = nn.Linear(2000, 1024)
         self.bottleneck_layer2.apply(init_weights)
         self.bottleneck_layer = nn.Sequential(self.bottleneck_layer1, nn.ReLU(), nn.Dropout(0.5),
                                               self.bottleneck_layer2, nn.ReLU(), nn.Dropout(0.5))
 
-        self.classifier_layer = nn.Linear(100, len(dset_classes))
+        self.classifier_layer = nn.Linear(1024, len(dset_classes))
         self.classifier_layer.apply(init_weights)
         self.predict_layer = nn.Sequential(self.model_fc, self.bottleneck_layer, self.classifier_layer)
 
-    def forward(self, x):
+
+
+
+    def forward(self, x, domain_code):
+        x = torch.cat([x, domain_code], dim=0)
         feature = self.model_fc(x)
         out = self.bottleneck_layer(feature)
         outC = self.classifier_layer(out)
@@ -233,20 +265,43 @@ def grl_hook(coeff):
 
     return fun1
 
+class MSE(nn.Module):
+    def __init__(self):
+        super(MSE, self).__init__()
+
+    def forward(self, pred, real):
+        diffs = torch.add(real, -pred)
+        n = torch.numel(diffs.data)
+        mse = torch.sum(diffs.pow(2)) / n
+
+        return mse
+
+
 if __name__ == '__main__':
     num_features = 2048
+    domain_encoder = DomainEncoder()
+    domain_encoder = domain_encoder.to(device)
     net = BSP_CDAN(num_features)
     net = net.to(device)
+    decoder = Decoder()
+    decoder = decoder.to(device)
     # ad_net = AdversarialNetwork(256 * len(dset_classes), 1024)
-    ad_net = AdversarialNetwork(100, 100)
+    ad_net = AdversarialNetwork(1024, 100)
     ad_net = ad_net.to(device)
+
+    mse = MSE()
+    mse = mse.to(device)
+
     net.train(True)
     ad_net.train(True)
     criterion = {"classifier": nn.CrossEntropyLoss(), "adversarial": nn.BCELoss()}
     optimizer_dict = [{"params": filter(lambda p: p.requires_grad, net.model_fc.parameters()), "lr": 0.1},
                       {"params": filter(lambda p: p.requires_grad, net.bottleneck_layer.parameters()), "lr": 1},
                       {"params": filter(lambda p: p.requires_grad, net.classifier_layer.parameters()), "lr": 1},
-                      {"params": filter(lambda p: p.requires_grad, ad_net.parameters()), "lr": 1}]
+                      {"params": filter(lambda p: p.requires_grad, ad_net.parameters()), "lr": 1},
+                      {"params": filter(lambda p: p.requires_grad, domain_encoder.parameters()), "lr": 1},
+                      {"params": filter(lambda p: p.requires_grad, decoder.parameters()), "lr": 1}]
+
     optimizer = optim.SGD(optimizer_dict, lr=0.1, momentum=0.9, weight_decay=0.0005, nesterov=True)
     train_cross_loss = train_transfer_loss = train_total_loss = train_sigma = 0.0
     len_source = len(dset_loaders["train"]) - 1
@@ -265,7 +320,7 @@ if __name__ == '__main__':
     for iter_num in range(1, num_iter + 1):
         # print(iter_num)
         net.train(True)
-        optimizer = inv_lr_scheduler(param_lr, optimizer, iter_num, init_lr=0.020, gamma=0.001, power=0.75,
+        optimizer = inv_lr_scheduler(param_lr, optimizer, iter_num, init_lr=0.002, gamma=0.001, power=0.75,
                                      weight_decay=0.0005)
 
         optimizer.zero_grad()
@@ -279,10 +334,18 @@ if __name__ == '__main__':
         inputs_target, labels_target = data_target
         inputs = torch.cat((inputs_source, inputs_target), dim=0)
         dc_target = torch.from_numpy(np.array([[1], ] * batch_size["train"] + [[0], ] * batch_size["train"])).float()
+        src_domain_input = torch.from_numpy(np.array([0, 1] * batch_size['train']))
+        tgt_domain_input = torch.from_numpy(np.array([1, 0] * batch_size['train']))
+
+        domain_input = torch.cat([src_domain_input, tgt_domain_input], dim=0).to(device)
         inputs = inputs.to(device)
         labels = labels_source.to(device)
         dc_target = dc_target.to(device)
-        feature, outC = net(inputs)
+
+        domain_code = domain_encoder(domain_input)
+        feature, outC = net(inputs, domain_code)
+        rec_feature = decoder(feature, domain_code)
+        mse_loss = mse(rec_feature, feature)
 
         classifier_loss = criterion["classifier"](outC.narrow(0, 0, batch_size["train"]), labels)
         total_loss = classifier_loss
@@ -290,7 +353,7 @@ if __name__ == '__main__':
         coeff = calc_coeff(iter_num)
         transfer_loss = CDAN(feature, ad_net)
         # total_loss = total_loss + transfer_loss + sigma_loss
-        total_loss = total_loss + transfer_loss
+        total_loss = total_loss + transfer_loss + mse_loss
         total_loss.backward()
         optimizer.step()
         train_cross_loss += classifier_loss.item()
