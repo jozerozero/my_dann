@@ -159,6 +159,28 @@ class DomainEncoder(nn.Module):
         pass
 
 
+class TransPredictor(nn.Module):
+
+    def __init__(self):
+        super(TransPredictor, self).__init__()
+        self.trans_layer1 = nn.Linear(2048, 1000)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(0.5)
+
+        self.trans_layer2 = nn.Linear(1000, 1000)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(0.5)
+
+        self.trans_layer3 = nn.Linear(1000, 65)
+
+        self.train_predictor = nn.Sequential(self.trans_layer1, self.relu1, self.dropout1,
+                                             self.trans_layer2, self.relu2, self.dropout2,
+                                             self.trans_layer3)
+
+    def forward(self, rec_feature):
+        return self.train_predictor(rec_feature)
+
+
 class Decoder(nn.Module):
     
     def __init__(self, input_size=1025, ):
@@ -296,6 +318,9 @@ if __name__ == '__main__':
     ad_net = AdversarialNetwork(1024, 100)
     ad_net = ad_net.to(device)
 
+    transpredictor = TransPredictor()
+    transpredictor = transpredictor.to(device)
+
     mse = MSE()
     mse = mse.to(device)
 
@@ -307,7 +332,8 @@ if __name__ == '__main__':
                       {"params": filter(lambda p: p.requires_grad, net.classifier_layer.parameters()), "lr": 1},
                       {"params": filter(lambda p: p.requires_grad, ad_net.parameters()), "lr": 1},
                       {"params": filter(lambda p: p.requires_grad, domain_encoder.parameters()), "lr": 1},
-                      {"params": filter(lambda p: p.requires_grad, decoder.parameters()), "lr": 1}]
+                      {"params": filter(lambda p: p.requires_grad, decoder.parameters()), "lr": 1},
+                      {"params": filter(lambda p: p.requires_grad, transpredictor.parameters()), "lr": 1}]
 
     optimizer = optim.SGD(optimizer_dict, lr=0.1, momentum=0.9, weight_decay=0.0005, nesterov=True)
     train_cross_loss = train_transfer_loss = train_total_loss = train_sigma = 0.0
@@ -343,8 +369,10 @@ if __name__ == '__main__':
         dc_target = torch.from_numpy(np.array([[1], ] * batch_size["train"] + [[0], ] * batch_size["train"])).float()
         src_domain_input = torch.from_numpy(np.array([[0, 1]] * batch_size['train'])).float()
         tgt_domain_input = torch.from_numpy(np.array([[1, 0]] * batch_size['train'])).float()
+        trans_domain_input = torch.from_numpy(np.array([[1, 0]] * batch_size['train'])).float()
 
         domain_input = torch.cat([src_domain_input, tgt_domain_input], dim=0).to(device)
+        trans_domain_input = trans_domain_input.to(device)
         inputs = inputs.to(device)
         labels = labels_source.to(device)
         dc_target = dc_target.to(device)
@@ -354,15 +382,20 @@ if __name__ == '__main__':
         # exit()
 
         domain_code = domain_encoder(domain_input)
+        trans_domain_code = domain_encoder(trans_domain_input)
+        cls_domain_code = domain_encoder(src_domain_input.to(device))
         feature, outC, resnet_feature = net(inputs, domain_code)
-        # print(domain_code.size())
-        # print(feature.size())
-        # exit()
 
         rec_feature = decoder(feature, domain_code)
-        # print(resnet_feature.size())
-        # print(rec_feature.size())
-        # exit()
+
+        trans_rec_feature = decoder(feature.narrow(0, 0, int(feature.size(0) / 2)), trans_domain_code)
+        cls_rec_feature = decoder(feature.narrow(0, 0, int(feature.size(0) / 2)), trans_domain_code)
+        rec_label_trans = transpredictor(trans_rec_feature)
+        rec_label_cls = transpredictor(cls_rec_feature)
+
+        trans_label_loss =\
+            criterion["classifier"](rec_label_trans, labels) + criterion["classifier"](rec_label_cls, labels)
+
         mse_loss = mse(rec_feature, resnet_feature)
 
         classifier_loss = criterion["classifier"](outC.narrow(0, 0, batch_size["train"]), labels)
@@ -371,7 +404,7 @@ if __name__ == '__main__':
         coeff = calc_coeff(iter_num)
         transfer_loss = CDAN(feature, ad_net)
         # total_loss = total_loss + transfer_loss + sigma_loss
-        total_loss = total_loss + transfer_loss + mse_loss
+        total_loss = total_loss + transfer_loss + 0.5 * mse_loss + 0.5 * trans_label_loss
         total_loss.backward()
         optimizer.step()
         train_cross_loss += classifier_loss.item()
