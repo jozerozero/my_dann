@@ -18,7 +18,7 @@ parser.add_argument('--src', type=str, default='A', metavar='S',
                     help='source dataset')
 parser.add_argument('--tgt', type=str, default='C', metavar='S',
                     help='target dataset')
-parser.add_argument('--num_iter', type=int, default=5002,
+parser.add_argument('--num_iter', type=int, default=20002,
                     help='max iter_num')
 args = parser.parse_args()
 
@@ -507,7 +507,7 @@ else:
     iter_target = iter(dset_loaders["val"])
     for param_group in optimizer.param_groups:
         param_lr.append(param_group["lr"])
-    test_interval = 500
+    test_interval = 100
     num_iter = max_iter
     for iter_num in range(1, num_iter + 1):
         print(iter_num)
@@ -547,7 +547,7 @@ else:
                           train_sigma / float(test_interval),
                           train_total_loss / float(test_interval)))
             train_cross_loss = train_transfer_loss = train_total_loss = train_sigma = 0.0
-        if (iter_num % 500) == 0:
+        if (iter_num % 100) == 0:
             net.eval()
             test_acc = test_target(dset_loaders, net.predict_layer)
             print('test_acc:%.4f' % (test_acc))
