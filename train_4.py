@@ -20,7 +20,10 @@ parser.add_argument('--tgt', type=str, default='C', metavar='S',
                     help='target dataset')
 parser.add_argument('--num_iter', type=int, default=20002,
                     help='max iter_num')
+parser.add_argument("--record", type=str)
 args = parser.parse_args()
+
+record = open(args.record, mode='a')
 
 def get_datasetname(args):
     A = './data/Art.txt'
@@ -347,8 +350,6 @@ if __name__ == '__main__':
     test_interval = 100
     num_iter = args.num_iter
     best_result = 0.0
-    record_file_path = "best_result.txt"
-    record = open(record_file_path, "a")
 
     for iter_num in range(1, num_iter + 1):
         # print(iter_num)
