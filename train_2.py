@@ -446,7 +446,7 @@ if noe < 2:
                 if test_acc > best_result:
                     best_result = test_acc
                     pass
-                print('test_acc:%.4\t best_result:%f'.format(test_acc, best_result))
+                print("test_acc:%f\t best_result:%f"%(test_acc, best_result))
                 print("%s->%s:%f".format(args.src, args.tgt, best_result), file=record)
 
 else:
