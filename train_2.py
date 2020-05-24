@@ -185,6 +185,7 @@ def test_target(loader, model, test_iter=0):
                 total_inputs = torch.cat(inputs, dim=0)
                 total_outputs = model(total_inputs)
                 outputs = torch.chunk(total_outputs, 10, dim=0)
+
                 # for o in split_outputs:
                 #     print(o.size())
                 # exit()
