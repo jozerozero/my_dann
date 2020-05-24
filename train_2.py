@@ -18,7 +18,7 @@ parser.add_argument('--src', type=str, default='A', metavar='S',
                     help='source dataset')
 parser.add_argument('--tgt', type=str, default='C', metavar='S',
                     help='target dataset')
-parser.add_argument('--num_iter', type=int, default=50002,
+parser.add_argument('--num_iter', type=int, default=20002,
                     help='max iter_num')
 args = parser.parse_args()
 
@@ -77,6 +77,7 @@ def get_datasetname(args):
 
 src,tgt,office,visda,noe = get_datasetname(args)
 
+# batch_size = {"train": 36, "val": 36, "test": 4}
 batch_size = {"train": 36, "val": 36, "test": 4}
 for i in range(10):
     batch_size["val" + str(i)] = 4
@@ -181,10 +182,22 @@ def test_target(loader, model, test_iter=0):
                     inputs[j] = inputs[j].to(device)
                 labels = labels.to(device)
                 outputs = []
-                for j in range(10):
-                    output = model(inputs[j])
-                    outputs.append(output)
+                total_inputs = torch.cat(inputs, dim=0)
+                total_outputs = model(total_inputs)
+                outputs = torch.chunk(total_outputs, 10, dim=0)
+                # for o in split_outputs:
+                #     print(o.size())
+                # exit()
+                # for j in range(10):
+                #     output = model(inputs[j])
+                #     print(output.size())
+                #     outputs.append(output)
+                # print(len(outputs))
+                # print("split_outputs:", split_outputs[0])
+                # print("outputs", outputs[0])
                 outputs = sum(outputs)
+                # print(outputs.size())
+                # exit()
                 if start_test:
                     all_output = outputs.data.float()
                     all_label = labels.data.float()
@@ -215,10 +228,14 @@ class BSP_CDAN(nn.Module):
             self.model_fc = model.Resnet101Fc()
         else:
             self.model_fc = model.Resnet50Fc()
-        self.bottleneck_layer1 = nn.Linear(num_features, 256)
+        self.bottleneck_layer1 = nn.Linear(num_features, 2000)
         self.bottleneck_layer1.apply(init_weights)
-        self.bottleneck_layer = nn.Sequential(self.bottleneck_layer1, nn.ReLU(), nn.Dropout(0.5))
-        self.classifier_layer = nn.Linear(256, len(dset_classes))
+        self.bottleneck_layer2 = nn.Linear(2000, 100)
+        self.bottleneck_layer2.apply(init_weights)
+        self.bottleneck_layer = nn.Sequential(self.bottleneck_layer1, nn.ReLU(), nn.Dropout(0.5),
+                                              self.bottleneck_layer2, nn.ReLU(), nn.Dropout(0.5))
+
+        self.classifier_layer = nn.Linear(100, len(dset_classes))
         self.classifier_layer.apply(init_weights)
         self.predict_layer = nn.Sequential(self.model_fc, self.bottleneck_layer, self.classifier_layer)
 
@@ -268,10 +285,10 @@ class AdversarialNetwork(nn.Module):
         x.register_hook(grl_hook(coeff))
         x = self.ad_layer1(x)
         x = self.relu1(x)
-        x = self.dropout1(x)
-        x = self.ad_layer2(x)
-        x = self.relu2(x)
-        x = self.dropout2(x)
+        # x = self.dropout1(x)
+        # x = self.ad_layer2(x)
+        # x = self.relu2(x)
+        # x = self.dropout2(x)
         y = self.ad_layer3(x)
         y = self.sigmoid(y)
         return y
@@ -345,7 +362,7 @@ if noe < 2:
     net = BSP_CDAN(num_features)
     net = net.to(device)
     # ad_net = AdversarialNetwork(256 * len(dset_classes), 1024)
-    ad_net = AdversarialNetwork(256, 100)
+    ad_net = AdversarialNetwork(100, 100)
     ad_net = ad_net.to(device)
     net.train(True)
     ad_net.train(True)
@@ -365,8 +382,12 @@ if noe < 2:
         param_lr.append(param_group["lr"])
     test_interval = 100
     num_iter = max_iter
+    best_result = 0.0
+    record_file_path = "best_result.txt"
+    record = open(record_file_path, "a")
+
     for iter_num in range(1, num_iter + 1):
-        print(iter_num)
+        # print(iter_num)
         net.train(True)
         if office == False:
             optimizer = inv_lr_scheduler(param_lr, optimizer, iter_num, init_lr=0.003, gamma=0.0001, power=0.75,
@@ -422,7 +443,12 @@ if noe < 2:
                 Visda_test(dset_loaders, net.predict_layer,iter_num)
             else:
                 test_acc = test_target(dset_loaders, net.predict_layer)
-                print('test_acc:%.4f'%(test_acc))
+                if test_acc > best_result:
+                    best_result = test_acc
+                    pass
+                print('test_acc:%.4\t best_result:%f'.format(test_acc, best_result))
+                print("%s->%s:%f".format(args.src, args.tgt, best_result), file=record)
+
 else:
     class GRL(nn.Module):
         def __init__(self, num_features):
